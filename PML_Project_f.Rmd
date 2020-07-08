@@ -1,0 +1,137 @@
+---
+title: 'How well you do barbell lifts?: prediction using data from accelerometers'
+author: "Alfonso Buitrago"
+date: "July 6th - 2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## Summary
+Devices such as Jawbone Up, Nike FuelBand, and Fitbit are used by people to collect large amounts of data about personal activity. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+This project answers the question about how well people do it on their work out, using machine learning algorithms and data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+
+The training data set consists on data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants, which were asked to perform barbell lifts correctly and incorrectly in 5 different ways: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.
+
+Classification with Trees and Random Forest with cross validation were used to train models. Parameters like interpretability, complexity, speed and accuracy were considered at selecting the prediction model. After training and selecting a model, predictions were made for 20 different test cases.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Data exploring
+The training and testing data sets were provided in separate files, so no splitting was required.  
+
+```{r data loading, cache=TRUE}
+
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+
+obs_tr <- nrow(training)
+vars_tr <- ncol(training)
+obs_ts <- nrow(testing)
+
+```
+
+The training data set contains `r vars_tr` variables and  `r obs_tr` observations, while the testing data set contains `r obs_ts` observations. With such a big number of variables, careful examination is required in order to select the most proper predictors for the analysis.
+
+Due to the small number of observations in the training set, additional splitting to create a validation set is not recommended. Then, cross validation was used in order to get a better idea of the out of sample error.
+
+Taking a closer look to the data, variables with the highest quantity of information are related to measurements of roll, pitch, yaw, total acceleration, in addition to acceleration, gyroscope and magnetometer data in three axis (x, y and z), from devices located at belt, arm, dumbbell and forearm.  Other variables contain summary and descriptive statistics of the measured data, and in most of the observations they are NA.  Only measured data will be used for the analysis. 
+
+
+```{r data conditionng}
+
+library(caret)
+ind <- c(7:11,37:49, 60:68, 84:86, 113:124, 151:159)
+
+set.seed(1524)
+trainingM <- training[,c(ind,160)]
+testingM <- testing[,ind]
+
+trainingM$classe <- as.factor(trainingM$classe)
+
+```
+
+## Models training and selection
+As this is basically a classification problem, the first tried algorithm, due to interpretability and simplicity, was Trees. Then, random forest was used.
+
+Caret package uses bootstrapping as a resampling method. However, as bootstraping underestimates the error, k-fold cross validation with 10 folds was used instead.
+
+Also, as a validation set is not advisable in this case, the proxy used for out of sample error is the in sample error with cross validation. This proxy may be optimistic but due to the size limitations of the training data set there are not many options.
+
+### Trees
+The first training method used was Trees, with the default options.
+
+```{r trees, cache= TRUE}
+
+trCon <- trainControl(method = "repeatedcv", number = 10, repeats = 5)
+modFitT <- train(classe ~., method="rpart", trControl=trCon, data=trainingM)
+
+print(modFitT)
+
+```
+  
+As observed in the summary above, the accuracy of the default Trees method is very low. However, looking at the confusion matrix below, it does a pretty good job in determining if the person does the workout exactly according to the specification (Class A). But it fails in establishing what type of mistake was made if the exercise was performed incorrectly.  
+  
+```{r cm}
+
+confusionMatrix(predict(modFitT,trainingM), as.factor(trainingM$classe))
+
+```
+
+  
+The Tree plot below shows that the parameters to determine if the workout was performed exactly according to the specification are roll_belt < 130.5, and:  
+*  pitch_forearm < -33.95 or  
+*  pitch_forearm > -33.95 and magnet_dumbbell_y < 439.5 and roll_forearm < 123.5
+
+```{r trees plot, fig.height= 10, fig.width=15}
+
+plot(modFitT$finalModel)
+text(modFitT$finalModel, use.n=T, cex =.8)
+
+```
+
+The accuracy of the default method is 53.3% and the error is 46.7%.
+
+A tuning option for Trees in order to increase accuracy, is increasing the number of splits. One way of doing this, is by increasing the **tuneLength** parameter. Following there is an example increasing the parameter to 50.  There is a considerable increase in the accuracy.  However, the complexity increases and the interpretability is reduced.
+
+```{r trees2, cache= TRUE}
+
+trCon <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+modFitT50 <- train(classe ~ ., method= "rpart", trControl= trCon, tuneLength=50, data= trainingM)
+
+print(modFitT50)
+
+```
+
+The accuracy of the tuned method is 90.7% and the error is 9.3%.
+
+### Random Forest
+Random Forest is one of the highest accuracy prediction methods. However, the drawbacks are that is less interpretable and much slower to train.  Following is the summary of the final model:
+
+```{r random forests, cache= TRUE}
+
+set.seed(1524)
+
+modFitRF <- train(classe ~ ., method= "rf", trControl= trCon, prox= TRUE, data= trainingM)
+
+print(modFitRF)
+
+```
+
+Accuracy is almost 100%. The error is lower than 0.2%.  
+
+### Method selection
+Despite training velocity is much slower and it is less interpretable than Trees, due to highest accuracy, the method selected for prediction was **Random Forest**.  However, if models had to be trained again, I'd use tuned Trees, sacrificing some accuracy  for speed.  
+
+
+## Prediction
+Using Random Forest trained algorithm, following there is the prediction for the testing data set:
+
+```{r pred}
+
+predict(modFitRF, testingM)
+
+```
+
